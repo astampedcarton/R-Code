@@ -43,7 +43,9 @@ server <- function(input, output) {
     files <- list.files(loc(), full.names = TRUE)    
     print(paste0("File location:",loc))
     
-    srcdat <- reactiveVal(readsrcfiles(paste0(loc,"adsl.ss7bdat")))
+    # G:\My Drive\Pharma_Life\SAS\ADaM_Review.sas
+    #srcdat <- reactiveVal(readsrcfiles(paste0(loc,"ADaM_Review.sas")))
+    srcdat <- reactiveVal(readsrcfiles(loc))
     output$datatable <- renderDT({
       srcdt <- srcdat()
       labels <- sapply(srcdt, function(x) attr(x, "label"))
@@ -58,14 +60,18 @@ server <- function(input, output) {
 
 
 readsrcfiles <- function(inloc){
+  print("Start src read")
+  print(inloc)
   # Read SAS file
 # sas_file <- "G:/My Drive/Pharma_Life/SAS/ADaM_Review.sas"
   pgmhealth <- data.frame()
   dftab <- data.frame()
   # Get all the files in a directory
   flist <- list.files(inloc, pattern="*.sas$", full.names=TRUE)
+  print(flist)
   
   for (file in flist){
+    print(cat("Busy with,", file))
     sas_code <- readLines(file, warn = FALSE)
     domain <- basename(file)
     # Join into single string for multi-line regex
@@ -116,15 +122,24 @@ readsrcfiles <- function(inloc){
     #Count the nr of lines
     pgmnline <- length(nlinecoms)
 
-    #Count the nr of ;
+    #Count the nr of data/proc
     semicnt <- sum(stringr::str_count(nlinecoms,";"))
+    datcnt <- sum(stringr::str_count(nlinecoms,"data"))
+    procnt <- sum(stringr::str_count(nlinecoms,"proc"))
+    
+    statcnt <- datcnt + procnt
 
     # Count the nr of lines with 2 or more statements per line
     multcnt <- length(which(sas_code > 1))
     #print(cnt)
 
+    # the ratio of comments to statements
+    dpratio <- round((comcnt / statcnt) * 100, digit=1)
+    stratio <- round((comcnt / semicnt) * 100, digit=1)
+    
     # Format: domain, nr of lines in a pgm, nr of comments, statements, multiple state lines pe
-    dftab <- data.frame(domain, pgmnline, comcnt, semicnt, multcnt)
+    dftab <- data.frame("domain"=domain, "pgmline"=pgmnline, "comcnt"=comcnt, 
+                        "statcnt"=statcnt, "dpratio"=dpratio, "stratio"=stratio, "multcnt"=multcnt)
     pgmhealth <- bind_rows(dftab,pgmhealth)
   }  
 
@@ -133,16 +148,18 @@ readsrcfiles <- function(inloc){
   
   #Assign labels
   # Assign labels to the variables
-  # Hmisc::label(pgmhealth$domain) <- "Program Name"
-  # Hmisc::label(pgmhealth$pgmnline) <- "# of lines in program"
-  # Hmisc::label(pgmhealth$comcnt) <- "# of Comments"
-  # Hmisc::label(pgmhealth$semicnt) <- "# of statements"
-  # Hmisc::label(pgmhealth$multcnt) <- "# of multi statements per line"
+   Hmisc::label(pgmhealth$domain) <- "Program Name"
+   Hmisc::label(pgmhealth$pgmline) <- "# of lines in program"
+   Hmisc::label(pgmhealth$comcnt) <- "# of Comments"
+   Hmisc::label(pgmhealth$statcnt) <- "# of statements"
+   Hmisc::label(pgmhealth$dpratio) <- "Coms to data/proc ratio"
+   Hmisc::label(pgmhealth$stratio) <- "Coms to state ratio"
+   Hmisc::label(pgmhealth$multcnt) <- "# of multi statements per line"
   
   # Extract labels
-  # labels <- sapply(pgmhealth, function(x) attr(x, "label"))
-  # labels[is.na(labels) | labels == ""] <- names(pgmhealth)
-  # labels <- unname(labels)  # must be unnamed vector    
+  labels <- sapply(pgmhealth, function(x) attr(x, "label"))
+  labels[is.na(labels) | labels == ""] <- names(pgmhealth)
+  labels <- unname(labels)  # must be unnamed vector    
 
   return(pgmhealth)
 }

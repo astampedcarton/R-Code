@@ -19,14 +19,22 @@ library(dplyr)
 ui <- fluidPage(
 
     # Application title
-    titlePanel("Program health"),
+    titlePanel("Project health"),
 
     # Sidebar with a slider input for number of bins 
     sidebarLayout(
         sidebarPanel(
-           textInput("dirpath","Enter the path to the programs", value="."),
-           actionButton("getFiles", "Load data")
+           textInput("dirpath","Enter the path to the programs", value=""),
+           actionButton("getFiles", "Load data"),
+           textInput("appadpath","ADaM Approval Paths", value=""),
+           actionButton("getadamapp", "Check Status"),
+           textInput("appsdpath","SDTM Approval Paths", value=""),
+           actionButton("getsdtmapp", "Check Status"),
+           uiOutput("adamappr"),
+           uiOutput("sdtmappr")
         ),
+           #div("ADaM Approval Status:", uiOutput("adamappr"), style = "margin-bottom: 10px;"),
+           #div("SDTM Approval Status:", uiOutput("sdtmappr"))        ),
         # Show a plot of the generated distribution
         mainPanel(
            DTOutput("datatable")
@@ -46,32 +54,85 @@ server <- function(input, output) {
     # G:\My Drive\Pharma_Life\SAS\ADaM_Review.sas
     #srcdat <- reactiveVal(readsrcfiles(paste0(loc,"ADaM_Review.sas")))
     srcdat <- reactiveVal(readsrcfiles(loc))
+    
     output$datatable <- renderDT({
       srcdt <- srcdat()
       labels <- sapply(srcdt, function(x) attr(x, "label"))
       labels <- ifelse(is.na(labels) | labels == "", names(srcdt), labels)
       labels <- as.character(unname(labels))  # remove names & force char vector
       
-      datatable(srcdt, colnames = labels)    
+      datatable(srcdt, colnames = labels) %>%
+        formatStyle(
+          c("dpratio","stratio"),
+          backgroundColor = styleInterval(c(40, 85), c("tomato", "white", "tomato"))
+        )
     })
   })
   
+  observeEvent(input$getadamapp, {
+    #Check the ADaM spec approval
+    output$adamappr  <- renderUI({
+      # path to the file you want to check
+      #print(paste0("ADaM input path : ", input$appadpath))
+      adamexist <- fexistchk(input$appadpath)
+      status <- if (adamexist) {
+        tags$span("ADaM Approval Status: Found", style = "color: green; font-weight: bold;")        
+      } else {
+        tags$span("ADaM Approval Status: Missing", style = "color: red; font-weight: bold;")        
+      }      
+    })
+  })
+
+  observeEvent(input$getsdtmapp, {
+    #Check the SDTM spec approval
+    output$sdtmappr  <- renderUI({
+      # path to the file you want to check
+      #print(paste0("SDTM input path : ", input$appsdpath))
+      sdtmexist <- fexistchk(input$appsdpath)
+      status <- if (sdtmexist) {
+        tags$span("SDTM Approval Status: Found", style = "color: green; font-weight: bold;")        
+      } else {
+        tags$span("SDTM Approval Status: Missing", style = "color: red; font-weight: bold;")        
+      }      
+
+    })
+  })
+  
+    
 }
 
+# Check if the approval form exists in the defined location
+fexistchk <- function(loc){
+  apprfound <- list.files(
+    path = loc,
+    pattern = "Approval_.*_signed\\.pdf$",
+    ignore.case = TRUE
+  )
+  
+  if (length(apprfound) > 0) {
+    found <- TRUE
+  } else {
+    found <- FALSE
+  }
+  
+  return(found)
+  
+}
 
+# Read the source file and scan for specific pieces of information
 readsrcfiles <- function(inloc){
-  print("Start src read")
-  print(inloc)
+#  print("Start src read")
+#  print(inloc)
   # Read SAS file
 # sas_file <- "G:/My Drive/Pharma_Life/SAS/ADaM_Review.sas"
   pgmhealth <- data.frame()
   dftab <- data.frame()
   # Get all the files in a directory
   flist <- list.files(inloc, pattern="*.sas$", full.names=TRUE)
-  print(flist)
+#  print(flist)
   
   for (file in flist){
-    print(cat("Busy with,", file))
+#    print(cat("Busy with,", file))
     sas_code <- readLines(file, warn = FALSE)
     domain <- basename(file)
     # Join into single string for multi-line regex
@@ -123,9 +184,21 @@ readsrcfiles <- function(inloc){
     pgmnline <- length(nlinecoms)
 
     #Count the nr of data/proc
+    data_pat <- "^\\s*DATA\\s+[^;]+;"        # DATA step
+    proc_pat <- "^\\s*PROC\\s+[^;]+;"        # PROC step
+    
+    datcnt <- 0
+    procnt <- 0
+    semicnt <- 0
+    
+    datamat <- grepl(data_pat, nlinecoms, ignore.case = TRUE)
+    procmat <- grepl(proc_pat, nlinecoms, ignore.case = TRUE)    
+        
     semicnt <- sum(stringr::str_count(nlinecoms,";"))
-    datcnt <- sum(stringr::str_count(nlinecoms,"data"))
-    procnt <- sum(stringr::str_count(nlinecoms,"proc"))
+#    datcnt <- sum(stringr::str_count(nlinecoms,"data"))
+#    procnt <- sum(stringr::str_count(nlinecoms,"proc"))
+    datcnt <- sum(datamat)
+    procnt <- sum(procmat)
     
     statcnt <- datcnt + procnt
 
@@ -138,23 +211,34 @@ readsrcfiles <- function(inloc){
     stratio <- round((comcnt / semicnt) * 100, digit=1)
     
     # Format: domain, nr of lines in a pgm, nr of comments, statements, multiple state lines pe
-    dftab <- data.frame("domain"=domain, "pgmline"=pgmnline, "comcnt"=comcnt, 
-                        "statcnt"=statcnt, "dpratio"=dpratio, "stratio"=stratio, "multcnt"=multcnt)
+    dftab <- data.frame("domain"=domain, "pgmline"=pgmnline, "comcnt"=comcnt, "semicnt"=semicnt, 
+                        "multcnt"=multcnt, "statcnt"=statcnt, "dpratio"=dpratio, "stratio"=stratio)
     pgmhealth <- bind_rows(dftab,pgmhealth)
   }  
 
 #  print(pgmhealth)
   pgmhealth <- bind_rows(dftab,pgmhealth)
   
+ #%>%
+    #formatStyle(
+    #  "ID",
+    #  backgroundColor = styleInterval(c(5, 8), c("yellow", "white", "lightblue"))
+    #)  
+  
   #Assign labels
   # Assign labels to the variables
    Hmisc::label(pgmhealth$domain) <- "Program Name"
-   Hmisc::label(pgmhealth$pgmline) <- "# of lines in program"
+   Hmisc::label(pgmhealth$pgmline) <- "# lines in pgm"
    Hmisc::label(pgmhealth$comcnt) <- "# of Comments"
-   Hmisc::label(pgmhealth$statcnt) <- "# of statements"
-   Hmisc::label(pgmhealth$dpratio) <- "Coms to data/proc ratio"
-   Hmisc::label(pgmhealth$stratio) <- "Coms to state ratio"
-   Hmisc::label(pgmhealth$multcnt) <- "# of multi statements per line"
+   Hmisc::label(pgmhealth$semicnt) <- "# of stat."
+   Hmisc::label(pgmhealth$multcnt) <- "# mult stat line"
+   Hmisc::label(pgmhealth$statcnt) <- "# of data/proc"
+   Hmisc::label(pgmhealth$dpratio) <- "Coms data/proc ratio"
+   Hmisc::label(pgmhealth$stratio) <- "Coms state ratio"
+#   Hmisc::label(pgmhealth$stratio) <- "Coms state ratio"
+#   Hmisc::label(pgmhealth$headrs) <- "Headers Ready"
+   
+   
   
   # Extract labels
   labels <- sapply(pgmhealth, function(x) attr(x, "label"))
@@ -165,6 +249,7 @@ readsrcfiles <- function(inloc){
 }
 
 #inloc <- "G:/My Drive/Pharma_Life/SAS/"
+# G:\My Drive\Pharma_Life\SAS\
 
 #outds <- readsrcfiles(inloc)
 #View(outds)  

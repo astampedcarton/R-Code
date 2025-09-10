@@ -1,4 +1,4 @@
-#
+ #
 # This is a Shiny web application. You can run the application by clicking
 # the 'Run App' button above.
 #
@@ -13,38 +13,79 @@ library(shiny)
 library(DT)
 library(Hmisc)
 library(dplyr)
+library(jsonlite)
+library(shinyFiles)
 
 
 # Define UI for application that draws a histogram
 ui <- fluidPage(
-  
-  # Application title
-  titlePanel("Project health"),
-  
-  # Sidebar with a slider input for number of bins 
-  sidebarLayout(
-    sidebarPanel(
-      textInput("dirpath","Enter the path to the programs", value=""),
-      actionButton("getFiles", "Load data"),
-      textInput("appadpath","ADaM Approval Paths", value=""),
-      actionButton("getadamapp", "Check Status"),
-      textInput("appsdpath","SDTM Approval Paths", value=""),
-      actionButton("getsdtmapp", "Check Status"),
-      uiOutput("adamappr"),
-      uiOutput("sdtmappr")
-    ),
-    #div("ADaM Approval Status:", uiOutput("adamappr"), style = "margin-bottom: 10px;"),
-    #div("SDTM Approval Status:", uiOutput("sdtmappr"))        ),
-    # Show a plot of the generated distribution
-    mainPanel(
-      DTOutput("datatable")
+
+    # Application title
+    titlePanel("Project health"),
+
+    # Sidebar with a slider input for number of bins 
+    sidebarLayout(
+        sidebarPanel(
+           textInput("dirpath","Enter the path to the programs", value=""),
+           actionButton("getFiles" , "Load Data "),
+           shinyFilesButton("LoadSetup", "Load Setup", "Choose a setup to load", multiple = FALSE),
+           shinySaveButton("SaveSetup", "Save Setup", "Save setup", filetype = list(json="json")),           
+           textInput("appadpath","ADaM Approval Paths", value=""),
+           actionButton("getadamapp", "Check Status"),
+           textInput("appsdpath","SDTM Approval Paths", value=""),
+           actionButton("getsdtmapp", "Check Status"),
+           uiOutput("adamappr"),
+           uiOutput("sdtmappr")
+        ),
+           #div("ADaM Approval Status:", uiOutput("adamappr"), style = "margin-bottom: 10px;"),
+           #div("SDTM Approval Status:", uiOutput("sdtmappr"))        ),
+        # Show a plot of the generated distribution
+        mainPanel(
+           DTOutput("datatable")
+        )
     )
-  )
 )
 
 # Define server logic required to draw a histogram
-server <- function(input, output) {
+server <- function(input, output, session) {
   loc <- reactiveVal("")
+
+  roots <- c(home=normalizePath("~"))
+  
+  shinyFileChoose(input, "LoadSetup", roots=roots, session=session, filetypes=c("json"))
+  
+  observeEvent(input$LoadSetup, {
+    fileinfo <- parseFilePaths(roots, input$LoadSetup)
+    if (nrow(fileinfo) > 0){
+      filepath <- as.character(fileinfo$datapath[1])
+      setup <- fromJSON(filepath)
+      
+      updateTextInput(session, "dirpath"  , value=setup$rootloc)
+      updateTextInput(session, "appadpath", value=setup$adamapp)
+      updateTextInput(session, "appsdpath", value=setup$sdtmapp)
+    }
+  })
+  
+  #Save the setup to a JSON file
+  shinyFileSave(input, "SaveSetup", roots=roots, session=session, filetypes=c("json"))
+  
+  observeEvent(input$SaveSetup,{
+    fileinfo <- parseSavePath(roots, input$SaveSetup)
+    if (nrow(fileinfo) > 0){
+      filepath <- as.character(fileinfo$datapath[1])
+      print(filepath)
+      if (!grepl("\\.json$", filepath)){
+        filepath <- paste0(filepath, ".json")
+      }
+      setup <- list(
+        rootloc = input$dirpath,
+        adamapp = input$appadpath,
+        sdtmapp = input$appsdpath
+      )
+      write_json(setup, filepath, pretty=TRUE, auto_unbox=TRUE)
+    }
+
+  })
   
   observeEvent(input$getFiles, {
     loc <- input$dirpath
@@ -67,6 +108,7 @@ server <- function(input, output) {
           backgroundColor = styleInterval(c(40, 85), c("tomato", "white", "tomato"))
         )
     })
+    
   })
   
   observeEvent(input$getadamapp, {
@@ -74,56 +116,39 @@ server <- function(input, output) {
     output$adamappr  <- renderUI({
       # path to the file you want to check
       #print(paste0("ADaM input path : ", input$appadpath))
-      adamexist <- fexistchk(input$appadpath, "ADAM")
+      adamexist <- fexistchk(input$appadpath)
       status <- if (adamexist) {
-        tags$span("ADaM Approval Status: Found", style = "color: green; font-weight: bold;")
-        #if (!pdfsigned(adamexist)){
-        #  tags$span("ADaM Approval Status: Found but not signed", style = "color: red; font-weight: bold;")
-        #} else {
-        #  tags$span("ADaM Approval Status: Found and signed", style = "color: green; font-weight: bold;")
-        #}
+        tags$span("ADaM Approval Status: Found", style = "color: green; font-weight: bold;")        
       } else {
         tags$span("ADaM Approval Status: Missing", style = "color: red; font-weight: bold;")        
       }      
     })
   })
-  
+
   observeEvent(input$getsdtmapp, {
     #Check the SDTM spec approval
     output$sdtmappr  <- renderUI({
       # path to the file you want to check
       #print(paste0("SDTM input path : ", input$appsdpath))
-      sdtmexist <- fexistchk(input$appsdpath, "SDTM")
+      sdtmexist <- fexistchk(input$appsdpath)
       status <- if (sdtmexist) {
         tags$span("SDTM Approval Status: Found", style = "color: green; font-weight: bold;")        
       } else {
         tags$span("SDTM Approval Status: Missing", style = "color: red; font-weight: bold;")        
       }      
-      
+
     })
   })
-  
-  
+    
 }
 
 # Check if the approval form exists in the defined location
-fexistchk <- function(loc, type){
-  #pattern = "Approval_.*_signed\\.pdf$",
-  if (type=="ADAM") {
-    pat = "*ADaM_Specification_Approval_Form.*\\.pdf$"
-  } else {
-    pat = "*SDTM_Specification_Approval_Form.*\\.pdf$"
-  }
-  
-  print(pat)
-  print(loc)
-  
+fexistchk <- function(loc){
   apprfound <- list.files(
     path = loc,
-    pattern=pat,
+    pattern = "Approval_.*_signed\\.pdf$",
     ignore.case = TRUE
   )
-  print(apprfound)
   
   if (length(apprfound) > 0) {
     found <- TRUE
@@ -135,32 +160,20 @@ fexistchk <- function(loc, type){
   
 }
 
-
-# Determine if the pdf was signed or not
-pdfsigned <- function(pdf_file) {
-  # Read in the PDF as text
-  txt <- readLines(pdf_file, warn = FALSE)
-  
-  # Look for common signature markers in PDFs
-  sig_pat <- c("/Sig", "/DocTimeStamp", "DocuSign")
-  
-  any(sapply(sig_pat, function(p) any(grepl(p, txt, ignore.case = TRUE))))
-}
-
 # Read the source file and scan for specific pieces of information
 readsrcfiles <- function(inloc){
-  #  print("Start src read")
-  #  print(inloc)
+#  print("Start src read")
+#  print(inloc)
   # Read SAS file
-  # sas_file <- "G:/My Drive/Pharma_Life/SAS/ADaM_Review.sas"
+# sas_file <- "G:/My Drive/Pharma_Life/SAS/ADaM_Review.sas"
   pgmhealth <- data.frame()
   dftab <- data.frame()
   # Get all the files in a directory
   flist <- list.files(inloc, pattern="*.sas$", full.names=TRUE)
-  #  print(flist)
+#  print(flist)
   
   for (file in flist){
-    #    print(cat("Busy with,", file))
+#    print(cat("Busy with,", file))
     sas_code <- readLines(file, warn = FALSE)
     domain <- basename(file)
     # Join into single string for multi-line regex
@@ -192,8 +205,8 @@ readsrcfiles <- function(inloc){
     # Count and display
     comcnt <- length(all_comments)
     
-    #    cat("Found", comcnt, "comments\n")
-    #    print(all_comments)
+#    cat("Found", comcnt, "comments\n")
+#    print(all_comments)
     
     # Remove block comments /* ... */
     nblkcoms <- stringr::str_remove_all(
@@ -210,7 +223,7 @@ readsrcfiles <- function(inloc){
     
     #Count the nr of lines
     pgmnline <- length(nlinecoms)
-    
+
     #Count the nr of data/proc
     data_pat <- "^\\s*DATA\\s+[^;]+;"        # DATA step
     proc_pat <- "^\\s*PROC\\s+[^;]+;"        # PROC step
@@ -221,19 +234,19 @@ readsrcfiles <- function(inloc){
     
     datamat <- grepl(data_pat, nlinecoms, ignore.case = TRUE)
     procmat <- grepl(proc_pat, nlinecoms, ignore.case = TRUE)    
-    
+        
     semicnt <- sum(stringr::str_count(nlinecoms,";"))
-    #    datcnt <- sum(stringr::str_count(nlinecoms,"data"))
-    #    procnt <- sum(stringr::str_count(nlinecoms,"proc"))
+#    datcnt <- sum(stringr::str_count(nlinecoms,"data"))
+#    procnt <- sum(stringr::str_count(nlinecoms,"proc"))
     datcnt <- sum(datamat)
     procnt <- sum(procmat)
     
     statcnt <- datcnt + procnt
-    
+
     # Count the nr of lines with 2 or more statements per line
     multcnt <- length(which(sas_code > 1))
     #print(cnt)
-    
+
     # the ratio of comments to statements
     dpratio <- round((comcnt / statcnt) * 100, digit=1)
     stratio <- round((comcnt / semicnt) * 100, digit=1)
@@ -243,36 +256,36 @@ readsrcfiles <- function(inloc){
                         "multcnt"=multcnt, "statcnt"=statcnt, "dpratio"=dpratio, "stratio"=stratio)
     pgmhealth <- bind_rows(dftab,pgmhealth)
   }  
-  
-  #  print(pgmhealth)
+
+#  print(pgmhealth)
   pgmhealth <- bind_rows(dftab,pgmhealth)
   
-  #%>%
-  #formatStyle(
-  #  "ID",
-  #  backgroundColor = styleInterval(c(5, 8), c("yellow", "white", "lightblue"))
-  #)  
+ #%>%
+    #formatStyle(
+    #  "ID",
+    #  backgroundColor = styleInterval(c(5, 8), c("yellow", "white", "lightblue"))
+    #)  
   
   #Assign labels
   # Assign labels to the variables
-  Hmisc::label(pgmhealth$domain) <- "Program Name"
-  Hmisc::label(pgmhealth$pgmline) <- "# lines in pgm"
-  Hmisc::label(pgmhealth$comcnt) <- "# of Comments"
-  Hmisc::label(pgmhealth$semicnt) <- "# of stat."
-  Hmisc::label(pgmhealth$multcnt) <- "# mult stat line"
-  Hmisc::label(pgmhealth$statcnt) <- "# of data/proc"
-  Hmisc::label(pgmhealth$dpratio) <- "Coms data/proc ratio"
-  Hmisc::label(pgmhealth$stratio) <- "Coms state ratio"
-  #   Hmisc::label(pgmhealth$stratio) <- "Coms state ratio"
-  #   Hmisc::label(pgmhealth$headrs) <- "Headers Ready"
-  
-  
+   Hmisc::label(pgmhealth$domain) <- "Program Name"
+   Hmisc::label(pgmhealth$pgmline) <- "# lines in pgm"
+   Hmisc::label(pgmhealth$comcnt) <- "# of Comments"
+   Hmisc::label(pgmhealth$semicnt) <- "# of stat."
+   Hmisc::label(pgmhealth$multcnt) <- "# mult stat line"
+   Hmisc::label(pgmhealth$statcnt) <- "# of data/proc"
+   Hmisc::label(pgmhealth$dpratio) <- "Coms data/proc ratio"
+   Hmisc::label(pgmhealth$stratio) <- "Coms state ratio"
+#   Hmisc::label(pgmhealth$stratio) <- "Coms state ratio"
+#   Hmisc::label(pgmhealth$headrs) <- "Headers Ready"
+   
+   
   
   # Extract labels
   labels <- sapply(pgmhealth, function(x) attr(x, "label"))
   labels[is.na(labels) | labels == ""] <- names(pgmhealth)
   labels <- unname(labels)  # must be unnamed vector    
-  
+
   return(pgmhealth)
 }
 

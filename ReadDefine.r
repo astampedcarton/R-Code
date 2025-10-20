@@ -26,7 +26,7 @@ fullpath <- paste0(definepath, definename)
 #not read it
 
 deftxt <- read_xml(fullpath)
-
+ns <- xml_ns(deftxt)
 #Step 1 of 3 ----
 #Extract the Item groupDef information
 item_groups <- xml_find_all(deftxt, "//d1:ItemGroupDef", ns)

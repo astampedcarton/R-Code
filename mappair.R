@@ -92,13 +92,13 @@ mappair <- function(dfct, dfin, ctname, ctcode, decodeval=`Decoded Value`, codev
 }
 
 #Example of use
-ct <- readxl::read_xlsx("C:/Temp/Projects2/Specs.xlsx", "Codelists")
-lb <- data.frame(PARAMCD=c("CHEM","HEM","TRIG","CHEM","HEM","CHem"))
+#ct <- readxl::read_xlsx("C:/Temp/Projects2/Specs.xlsx", "Codelists")
+#lb <- data.frame(PARAMCD=c("CHEM","HEM","TRIG","CHEM","HEM","CHem"))
 
-ct$DecodeValue <- ct$`Decoded Value`
+#ct$DecodeValue <- ct$`Decoded Value`
 
-lb2 <- mappair(dfct=ct, dfin=lb, ctname="ADLBCAT", ctcode="Term", 
-               decodeval="DecodeValue", 
-               codeval = PARAMCD, 
-               pairval = PARAM)
+#lb2 <- mappair(dfct=ct, dfin=lb, ctname="ADLBCAT", ctcode="Term", 
+#               decodeval="DecodeValue", 
+#               codeval = PARAMCD, 
+#               pairval = PARAM)
 
